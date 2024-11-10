@@ -5,17 +5,24 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\Category;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log; // Import Log facade
+use Illuminate\Support\Facades\Log;
 
 class ProductController extends Controller
 {
     // Fetch all products with category relationships
     public function index()
     {
-        // Eager load the category relationships
-        $products = Product::with(['category'])->get();
+        $products = Product::with('category')->get();
 
-        return $products->map(function ($product) {
+        return response()->json($products->map(function ($product) {
+            // Decode the images field (which is stored as a JSON array)
+            $images = $product->images ? json_decode($product->images) : [];
+
+            // Generate full URLs for each image
+            $imageUrls = array_map(function ($image) {
+                return url("storage/{$image}"); // Assuming image is stored in 'uploads/product_images/{filename}'
+            }, $images);
+
             return [
                 'id' => $product->id,
                 'name' => $product->name,
@@ -23,11 +30,11 @@ class ProductController extends Controller
                 'price' => $product->price,
                 'stock' => $product->stock,
                 'category_name' => $product->category->name ?? null,
-                'image' => $product->image ? url($product->image) : null,
+                'images' => $imageUrls, // Return the array of full URLs for the images
                 'created_at' => $product->created_at,
                 'updated_at' => $product->updated_at,
             ];
-        });
+        }));
     }
 
     // Store a new product
@@ -41,32 +48,26 @@ class ProductController extends Controller
                 'price' => 'required|numeric',
                 'stock' => 'required|integer',
                 'category_id' => 'required|exists:categories,id',
-                'image' => 'nullable|image|mimes:jpg,jpeg,png|max:2048',
+                'images' => 'required|array|min:1|max:5', // Ensure between 1 and 5 images
+                'images.*' => 'image|mimes:jpg,jpeg,png,gif', // Validate each image is an image file
             ]);
 
-            // Create a new Product instance
+            // Store images in the custom 'uploads/product_images' directory
+            $imagePaths = [];
+            foreach ($validatedData['images'] as $image) {
+                // Store each image in 'uploads/product_images' directory
+                $imagePath = $image->store('uploads/product_images', 'public');
+                $imagePaths[] = $imagePath; // Store the relative path
+            }
+
+            // Create the product
             $product = new Product();
             $product->name = $validatedData['name'];
             $product->description = $validatedData['description'];
             $product->price = $validatedData['price'];
             $product->stock = $validatedData['stock'];
             $product->category_id = $validatedData['category_id'];
-
-            // Handle the image file upload
-            if ($request->hasFile('image')) {
-                $image = $request->file('image');
-                $imageName = time() . '.' . $image->getClientOriginalExtension();
-                $image->move(public_path('uploads'), $imageName);
-
-                // Save the image path relative to the public directory
-                $product->image = 'uploads/' . $imageName;
-                Log::info('Image uploaded:', [$product->image]); // Log the image path
-            } else {
-                Log::info('No image uploaded');
-                $product->image = null; // Set to null if no image is provided
-            }
-
-            // Save the product to the database
+            $product->images = json_encode($imagePaths); // Store image paths as a JSON array
             $product->save();
 
             return response()->json([
@@ -81,7 +82,8 @@ class ProductController extends Controller
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            // Handle other exceptions
+            // Log and handle other exceptions
+            Log::error('Error saving product: ' . $e->getMessage());
             return response()->json([
                 'message' => 'An error occurred',
                 'error' => $e->getMessage()
@@ -92,12 +94,22 @@ class ProductController extends Controller
     // Show a single product by ID
     public function show($id)
     {
-        $product = Product::with(['category'])->find($id);
+        // Retrieve the product along with its category (using eager loading)
+        $product = Product::with('category')->find($id);
 
         if (!$product) {
             return response()->json(['message' => 'Product not found'], 404);
         }
 
+        // Decode the images field (which is stored as a JSON array)
+        $images = $product->images ? json_decode($product->images) : [];
+
+        // Generate full URLs for each image path in the 'images' field
+        $imageUrls = array_map(function ($image) {
+            return url("storage/{$image}"); // Generate the full URL for each image
+        }, $images);
+
+        // Return the product details along with the category name and image URLs
         return response()->json([
             'id' => $product->id,
             'name' => $product->name,
@@ -105,95 +117,101 @@ class ProductController extends Controller
             'price' => $product->price,
             'stock' => $product->stock,
             'category_name' => $product->category->name ?? null,
-            'image' => $product->image ? url($product->image) : null,
+            'images' => $imageUrls, // Return the array of full URLs for the images
             'created_at' => $product->created_at,
             'updated_at' => $product->updated_at,
         ]);
     }
 
-    // Update a product by ID
-    public function update(Request $request, $id)
-    {
-        $product = Product::findOrFail($id);
-
-        // Validate only the fields that are sent in the request
-        $validatedData = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'description' => 'sometimes|nullable|string',
-            'price' => 'sometimes|numeric',
-            'stock' => 'sometimes|integer',
-            'category_id' => 'sometimes|exists:categories,id',
-            'image' => 'sometimes|nullable|image|mimes:jpg,jpeg,png|max:2048',
-        ]);
-
-        // Update only the fields that are provided
-        if ($request->has('name')) {
-            $product->name = $validatedData['name'];
-        }
-        if ($request->has('description')) {
-            $product->description = $validatedData['description'];
-        }
-        if ($request->has('price')) {
-            $product->price = $validatedData['price'];
-        }
-        if ($request->has('stock')) {
-            $product->stock = $validatedData['stock'];
-        }
-        if ($request->has('category_id')) {
-            $product->category_id = $validatedData['category_id'];
-        }
-
-        // Handle image update
-        if ($request->hasFile('image')) {
-            $image = $request->file('image');
-            $imageName = time() . '.' . $image->getClientOriginalExtension();
-            $image->move(public_path('uploads'), $imageName);
-            $product->image = 'uploads/' . $imageName;
-        }
-
-        // Save the updated product
-        $product->save();
-
-        return response()->json([
-            'message' => 'Product updated successfully',
-            'product' => $product
-        ], 200);
-    }
-
-    // Delete a product by ID
-    public function delete($id)
-    {
-        $product = Product::findOrFail($id);
-        $product->delete();
-        return response()->json(null, 204);
-    }
-
     // Fetch products by category
     public function getByCategoryId($categoryId)
     {
-        $products = Product::where('category_id', $categoryId)->get();
+        $products = Product::with('category')->where('category_id', $categoryId)->get();
 
         if ($products->isEmpty()) {
             return response()->json(['message' => 'No products found for this category'], 404);
         }
 
-        return response()->json($products);
+        return response()->json($products->map(function ($product) {
+            // Decode the images field (which is stored as a JSON array)
+            $images = $product->images ? json_decode($product->images) : [];
+
+            // Generate full URLs for each image
+            $imageUrls = array_map(function ($image) {
+                return url("storage/{$image}"); // Assuming image is stored in 'uploads/product_images/{filename}'
+            }, $images);
+
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'description' => $product->description,
+                'price' => $product->price,
+                'stock' => $product->stock,
+                'category_name' => $product->category->name ?? null,
+                'images' => $imageUrls, // Return the array of full URLs for the images
+                'created_at' => $product->created_at,
+                'updated_at' => $product->updated_at,
+            ];
+        }));
     }
 
-    // Fetch the last 20 products
+    // Fetch the last N products
     public function getLastNProducts($num)
     {
-        // Fetch the last $num products, ordered by created_at in descending order
-        $products = Product::orderBy('created_at', 'desc')->limit($num)->get();
+        $products = Product::with('category')->orderBy('created_at', 'desc')->limit($num)->get();
 
-        return response()->json($products);
+        return response()->json($products->map(function ($product) {
+            // Decode the images field (which is stored as a JSON array)
+            $images = $product->images ? json_decode($product->images) : [];
+
+            // Generate full URLs for each image
+            $imageUrls = array_map(function ($image) {
+                return url("storage/{$image}"); // Assuming image is stored in 'uploads/product_images/{filename}'
+            }, $images);
+
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'description' => $product->description,
+                'price' => $product->price,
+                'stock' => $product->stock,
+                'category_name' => $product->category->name ?? null,
+                'images' => $imageUrls, // Return the array of full URLs for the images
+                'created_at' => $product->created_at,
+                'updated_at' => $product->updated_at,
+            ];
+        }));
     }
-
 
     // Fetch all products sorted by creation date
     public function getAllProductsSorted()
     {
-        $products = Product::orderBy('created_at', 'desc')->get();
-        return response()->json($products);
+        $products = Product::with('category')->orderBy('created_at', 'desc')->get();
+
+        if ($products->isEmpty()) {
+            return response()->json(['message' => 'No products found'], 404);
+        }
+
+        return response()->json($products->map(function ($product) {
+            // Decode the images field (which is stored as a JSON array)
+            $images = $product->images ? json_decode($product->images) : [];
+
+            // Generate full URLs for each image
+            $imageUrls = array_map(function ($image) {
+                return url("storage/{$image}"); // Assuming image is stored in 'uploads/product_images/{filename}'
+            }, $images);
+
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'description' => $product->description,
+                'price' => $product->price,
+                'stock' => $product->stock,
+                'category_name' => $product->category->name ?? null,
+                'images' => $imageUrls, // Return the array of full URLs for the images
+                'created_at' => $product->created_at,
+                'updated_at' => $product->updated_at,
+            ];
+        }));
     }
 }

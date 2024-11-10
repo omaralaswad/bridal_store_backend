@@ -9,6 +9,10 @@ class Product extends Model
 {
     use HasFactory;
 
+    protected $casts = [
+        'images' => 'array', // Automatically handle images as an array
+    ];
+
     protected $fillable = [
         'name',
         'description',

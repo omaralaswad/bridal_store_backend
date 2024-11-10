@@ -1,7 +1,8 @@
 <?php
 
 
-use App\Models\Users;
+use App\Models\User;
+use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -25,21 +26,19 @@ Route::get('/', function () {
 // return ($donation);
 // });
 
-  Route::get('/find',function(){
-     $user = Users::find(1);
+Route::get('/admin/dashboard', function () {
+    return view('admin.dashboard'); // Ensure this view exists
+})->middleware('auth'); // Ensure this middleware is applied
+// In routes/web.php
+Route::get('login', [AuthController::class, 'showLoginForm'])->name('login'); // Show login form
+Route::post('login', [AuthController::class, 'login']); // Handle login
 
-     if ($user) {
-        foreach($user->archives as $archive)
-         echo$archive->total_amount_of_donation."<br />";
-        
-     } else {
-         // Handle the case where the user with ID 1 is not found.
-         echo "User not found.";
-     }
-    
-  });
+// Route::get('/admin/dashboard', function () {
+//     return view('admin.dashboard');
+// })->middleware('auth'); // Ensure only authenticated users can access
 
-  Route::get('/test-product', function () {
+
+Route::get('/test-product', function () {
     return view('test-product');
 });
 
