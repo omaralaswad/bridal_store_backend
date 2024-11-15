@@ -94,42 +94,34 @@ class CartController extends Controller
     {
         $request->validate([
             'user_id' => 'required|exists:users,id',
-            'product_id' => 'required|exists:products,id'
+            'item_id' => 'required|exists:order_items,id'  // Validate item_id instead of product_id
         ]);
 
-        // Find the item in the cart
-        $cartItem = Cart::where('user_id', $request->user_id)
-            ->where('product_id', $request->product_id)
+        // Find the item in the order items table by item_id and check if it belongs to the user
+        $orderItem = OrderItem::where('id', $request->item_id)
+            ->whereHas('order', function ($query) use ($request) {
+                $query->where('user_id', $request->user_id)
+                    ->where('status', 'pending');
+            })
             ->first();
 
-        if ($cartItem) {
-            // Remove the item from the cart
-            $cartItem->delete();
+        if ($orderItem) {
+            // Get the order and update the total amount
+            $order = $orderItem->order;
 
-            // Find the order associated with the user
-            $order = Order::where('user_id', $request->user_id)
-                ->where('status', 'pending')
-                ->first();
+            // Deduct the item total from the order's total amount
+            $order->total_amount -= $orderItem->price * $orderItem->quantity;
+            $order->save();
 
-            if ($order) {
-                // Remove the item from the order items
-                $orderItem = OrderItem::where('order_id', $order->id)
-                    ->where('product_id', $request->product_id)
-                    ->first();
-
-                if ($orderItem) {
-                    $orderItem->delete();
-                    // Update the total amount (optional)
-                    $order->total_amount -= $orderItem->price * $orderItem->quantity;
-                    $order->save();
-                }
-            }
+            // Delete the item from the order
+            $orderItem->delete();
 
             return response()->json(['message' => 'Item removed from cart'], 200);
         }
 
         return response()->json(['message' => 'Item not found in cart'], 404);
     }
+
 
     // Update item quantity in cart and order items
     public function updateCart(Request $request)
@@ -183,8 +175,9 @@ class CartController extends Controller
             ->with('orderItems.product.category')
             ->first();
 
+        // Check if there's a pending order for this user
         if (!$order) {
-            return response()->json(['message' => 'Cart is empty'], 404);
+            return response()->json(['message' => 'No pending order found for this user'], 404);
         }
 
         // Format the response data
@@ -198,10 +191,11 @@ class CartController extends Controller
             }, $images);
 
             return [
+                'item_id' => $orderItem->id,  // Include item_id here
                 'name' => $orderItem->product->name,
                 'description' => $orderItem->product->description,
                 'price' => $orderItem->price,
-                'item_total' => $orderItem->price * $orderItem->quantity,  // Rename to 'item_total'
+                'item_total' => $orderItem->price * $orderItem->quantity,
                 'category_name' => $orderItem->product->category->name ?? null,
                 'images' => $imageUrls,
                 'quantity' => $orderItem->quantity,
@@ -214,6 +208,9 @@ class CartController extends Controller
             'cart_items' => $cartItems,
         ]);
     }
+
+
+
 
 
 }
