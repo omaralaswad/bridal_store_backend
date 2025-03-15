@@ -18,15 +18,15 @@ class UserFactory extends Factory
      *
      * @return array<string, mixed>
      */
-    public function definition(): array
+    public function definition()
     {
         return [
-            'first_name' => $this->faker->firstName,
-            'last_name' => $this->faker->lastName,
-            'age' => $this->faker->numberBetween(18, 65),
+            'name' => $this->faker->name,
             'email' => $this->faker->unique()->safeEmail,
-            'password' => bcrypt('password'), // or Hash::make('password')
-            'role' => 'user', // default to 'user' role
+            'password' => bcrypt('password'), // Default password for testing
+            'role' => $this->faker->randomElement(['client', 'admin']),
+            'created_at' => now(),
+            'updated_at' => now(),
         ];
     }
 

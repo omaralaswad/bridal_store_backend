@@ -22,12 +22,7 @@ class User extends Authenticatable implements JWTSubject
      * @var array<int, string>
      */
     protected $fillable = [
-        'first_name',
-        'last_name',
-        'age',
-        'email',
-        'password',
-        'role',
+        'name', 'email', 'password', 'role', 'phone', 'address',
     ];
 
     /**
@@ -68,5 +63,18 @@ class User extends Authenticatable implements JWTSubject
     public function getJWTCustomClaims()
     {
         return [];
+    }
+
+    public function bookings()
+    {
+        return $this->hasMany(Booking::class);
+    }
+
+    /**
+     * A user can have many payments.
+     */
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
     }
 }

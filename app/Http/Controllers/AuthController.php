@@ -4,63 +4,68 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Validator;
-use App\Http\Controllers\Controller;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
-
-
 
 class AuthController extends Controller
 {
-
-    // Show login form
-    // public function showLoginForm()
-    // {
-    //     return view('auth.login'); // Create a view file for the login form
-    // }
-    // public function __construct()
-    // {
-    //     $this->middleware('auth:api', ['except' => ['login', 'register']]);
-    // }
-
     public function register(Request $req)
     {
         // Validate the incoming request
         $validator = Validator::make($req->all(), [
-            'first_name' => 'required|regex:/^[\pL\s-]+$/u|string',
-            'last_name' => 'required|regex:/^[\pL\s-]+$/u|string',
-            'age' => 'nullable|integer',
+            'name' => 'required|regex:/^[\pL\s-]+$/u|string',
             'email' => 'required|email|unique:users',
-            'password' => 'required|string|min:6|confirmed',
-            'role' => 'sometimes|in:admin,user', // Only allow 'admin' or 'user'
+            'password' => 'required|string|min:6',
+            'role' => 'sometimes|in:admin,user',
+            'phone' => 'required|string|min:8|max:15|regex:/^[0-9]+$/', // Phone number required
+            'address' => 'required|string|min:5|max:255', // Address required
         ]);
+
+
 
         // Return validation errors if any
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Assign default role to 'user' if not provided
+        // Assign default role if not provided
         $role = $req->input('role', 'user');
 
+        //dd($req->all());
         // Create the user
         $user = User::create([
-            'first_name' => $req->first_name,
-            'last_name' => $req->last_name,
-            'age' => $req->age,
+            'name' => $req->name,
             'email' => $req->email,
             'password' => Hash::make($req->password),
-            'role' => $role, // Use the provided role or default to 'user'
+            'role' => $role,
+            'phone' => $req->phone, // Save phone number if provided
+            'address' => $req->address, // Save address if provided
         ]);
 
         // Generate JWT token
         $token = JWTAuth::fromUser($user);
 
-        return response()->json(['message' => 'User successfully registered'], 201);
+        // Return response with phone and address included
+        return response()->json([
+            'message' => 'User successfully registered',
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'phone' => $user->phone, // Include phone if it exists
+                'address' => $user->address, // Include address if it exists
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at,
+            ],
+            'token' => $token,
+        ], 201);
     }
+
+
+
 
 
     public function login(Request $request)
@@ -71,35 +76,12 @@ class AuthController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        return $this->respondWithToken(token: $token);
-
+        return $this->respondWithToken($token);
     }
 
-
-
-    //     public function login(Request $request)
-// {
-//     $credentials = $request->only('email', 'password');
-
-    //     Log::info('Attempting to log in with credentials:', $credentials);
-
-    //     if (Auth::attempt($credentials)) {
-//         Log::info('User logged in successfully: ' . $request->email);
-//         return redirect()->intended('/admin/dashboard'); // Ensure this URL matches your dashboard route
-//     }
-
-    //     Log::warning('Failed login attempt for email: ' . $request->email);
-//     return redirect('login')->withErrors([
-//         'email' => 'The provided credentials do not match our records.',
-//     ]);
-// }
-
-
-
-    // Adjusted the 'direct' method to use JWTAuth
     public function direct()
     {
-        $type = JWTAuth::user()->type_of_user;
+        $type = JWTAuth::user()->role;
 
         if ($type == 'user') {
             return view('welcome');
@@ -108,13 +90,27 @@ class AuthController extends Controller
         }
     }
 
-    // Adjusted 'me' method to use JWTAuth
     public function me()
     {
-        return response()->json(JWTAuth::user());
+        // Retrieve the authenticated user
+        $user = Auth::user();
+
+        if (!$user) {
+            return response()->json(['message' => 'No authenticated user found'], 404);
+        }
+
+        // Return user details with phone & address
+        return response()->json([
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role,
+            'phone' => $user->phone,
+            'address' => $user->address,
+            'created_at' => $user->created_at,
+        ], 200);
     }
 
-    // Adjusted 'logout' method to invalidate JWT token
     public function logout()
     {
         JWTAuth::invalidate(JWTAuth::getToken());
@@ -132,7 +128,7 @@ class AuthController extends Controller
         return response()->json([
             'access_token' => $token,
             'token_type' => 'bearer',
-            'expires_in' => JWTAuth::factory()->getTTL() * 60 // Adjusted TTL
+            'expires_in' => JWTAuth::factory()->getTTL() * 60
         ]);
     }
 }
